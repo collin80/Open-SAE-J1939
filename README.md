@@ -1,10 +1,12 @@
 # Open SAE J1939
 
-Note: This project has been forked from https://github.com/DanielMartensson/Open-SAE-J1939
+Note: This project has been forked from https://github.com/DanielMartensson/Open-SAE-J1939 
+
 However, it was not forked via git while saving the history. All history and association with that repo has been severed. This is for two reasons. 1: A giant glob of Visual Studio stuff got (accidentally?) committed into that repo and I'd rather avoid it. 2: More importantly, I've renamed directories and files and reshaped the library to really be more suitable for direct use with Arduino and object oriented CAN libraries. This will only continue in the future such that any compatibility between this library and the origin library will become nonexistent as time goes on.
 
-The rest of the orignal readme is below. Take everything with a grain of salt as changes, when necessary, will happen. Most specifically, don't assume this library works with STM32 or other development ecosystems any longer. It's probably Arduino only.
+Please take the time to thank Daniel for this incredibly useful library. I'm sorry I had to mangle it to fit my uses.
 
+The rest of the orignal readme is below. Take everything with a grain of salt as changes, when necessary, will happen. Most specifically, don't assume this library works with STM32 or other development ecosystems any longer. It's probably Arduino only. Here's the original README:
 
 SAE J1939 is a protocol for shaping the CAN-bus message in a specific way that suits industrial vehicles such as tractors, machinery, trucks and more.
 
