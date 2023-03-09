@@ -9,21 +9,17 @@
 #define HARDWARE_HARDWARE_H_
 
 /* Select your processor choice here */
-#define STM32 1
-#define ARDUINO_GENERIC 2
-#define PIC 3
-#define AVR 4
-#define QT_USB 5
+#define DUE_CAN 1
+#define ESP32_CAN 2
+#define TEENSY_T4 3
 #define INTERNAL_CALLBACK 6
-#define DUE_CAN 7
-#define ESP32_CAN 8
 #define PROCESSOR_CHOICE ESP32_CAN
 
 /* C Standard library */
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
-#if PROCESSOR_CHOICE == ESP32_CAN
+#if PROCESSOR_CHOICE == ESP32_CAN || PROCESSOR_CHOICE == DUE_CAN
 #include <can_common.h>
 #endif
 
@@ -44,10 +40,16 @@ void FLASH_EEPROM_RAM_Memory(uint16_t *number_of_requested_bytes, uint8_t pointe
 bool Save_Struct(uint8_t data[], uint32_t data_length, char file_name[]);
 bool Load_Struct(uint8_t data[], uint32_t data_length, char file_name[]);
 
-#if PROCESSOR_CHOICE == ESP32_CAN
+#if PROCESSOR_CHOICE == ESP32_CAN || PROCESSOR_CHOICE == DUE_CAN
     void CAN_Set_Bus(CAN_COMMON *which);
     void CAN_Setup_Filter();
 #endif
+
+#if PROCESSOR_CHOICE == TEENSY_T4
+    void CAN_Set_Bus(FlexCAN_T4_Base *which);
+    void CAN_Setup_Filter();
+#endif
+
 
 #ifdef __cplusplus
 }

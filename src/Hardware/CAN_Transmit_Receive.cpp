@@ -13,41 +13,12 @@ static void (*Callback_Function_Send)(uint32_t, uint8_t, uint8_t[]);
 static void (*Callback_Function_Read)(uint32_t*, uint8_t[], bool*);
 
 /* Platform independent library headers for CAN */
-#if PROCESSOR_CHOICE == STM32
-#include "main.h"
-#elif PROCESSOR_CHOICE == ARDUINO_GENERIC
-#elif PROCESSOR_CHOICE == PIC
-#elif PROCESSOR_CHOICE == AVR
-#elif PROCESSOR_CHOICE == QT_USB
-#include "CAN_to_USB/can_to_usb.h"
-#elif PROCESSOR_CHOICE == DUE_CAN
-#include <due_can.h>
+#if PROCESSOR_CHOICE == DUE_CAN
+    #include <due_can.h>
 #elif PROCESSOR_CHOICE == ESP32_CAN
-#include <esp32_can.h>
-static CAN_COMMON *canBus = &CAN0;
-CAN_FRAME extFrames[32];
-uint32_t read_idx = 0;
-uint32_t write_idx = 0;
-
-void CAN_Set_Bus(CAN_COMMON *which)
-{
-    canBus = which;
-}
-
-void gotExtFrame (CAN_FRAME *frame)
-{
-    extFrames[write_idx] = *frame;
-    write_idx = (write_idx + 1) & 31;
-}
-
-void CAN_Setup_Filter()
-{
-                            //MB  ID MSK EXT
-    canBus->_setFilterSpecific(0, 0, 0, true); //watch for any extended frame
-    canBus->_setFilterSpecific(1, 0, 0, false); //watch for any standard frame
-    canBus->setCallback(0, gotExtFrame); //auto callback function on ext frames
-}
-
+    #include <esp32_can.h>
+#elif PROCESSOR_CHOICE == TEENSY_T4
+    #include <FlexCAN_T4.h>
 #elif PROCESSOR_CHOICE == INTERNAL_CALLBACK
 /* Nothing here because else statement should not be running */
 #else
@@ -92,26 +63,66 @@ static void Internal_Receive(uint32_t *ID, uint8_t data[], bool *is_new_message)
 }
 #endif
 
+//both use can_common so the exact same code will work for both.
+#if (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
+    static CAN_COMMON *canBus = &CAN0;
+    CAN_FRAME extFrames[32];
+    uint32_t read_idx = 0;
+    uint32_t write_idx = 0;
+
+    void CAN_Set_Bus(CAN_COMMON *which)
+    {
+        canBus = which;
+    }
+
+    void gotExtFrame (CAN_FRAME *frame)
+    {
+        extFrames[write_idx] = *frame;
+        write_idx = (write_idx + 1) & 31;
+    }
+
+    void CAN_Setup_Filter()
+    {
+                                //MB  ID MSK EXT
+        canBus->_setFilterSpecific(0, 0, 0, true); //watch for any extended frame
+        canBus->_setFilterSpecific(1, 0, 0, false); //watch for any standard frame
+        canBus->setCallback(0, gotExtFrame); //auto callback function on ext frames
+    }
+#endif
+
+#if (PROCESSOR_CHOICE == TEENSY_T4)
+    FlexCAN_T4_Base* canBus = _CAN0;
+    CAN_message_t extFrames[32];
+    uint32_t read_idx = 0;
+    uint32_t write_idx = 0;
+
+    void CAN_Set_Bus(FlexCAN_T4_Base *which)
+    {
+        canBus = which;
+    }
+
+    void gotExtFrame (const CAN_message_t &frame)
+    {
+        extFrames[write_idx] = frame;
+        write_idx = (write_idx + 1) & 31;
+    }
+
+    void CAN_Setup_Filter()
+    {
+        FlexCAN_T4* can = dynamic_cast<FlexCAN_T4 *>(canBus);
+        if (!can) return;
+        can->setMB((FLEXCAN_MAILBOX)0,RX,EXT);
+        can->setMBFilter(REJECT_ALL);
+        can->enableMBInterrupts();
+        can->onReceive(MB0, gotExtFrame);
+        can->setMBUserFilter(MB0,0x00,0x00); //hopefully let all extended frames through into this MB
+        can->mailboxStatus();
+    }
+#endif
+
 ENUM_J1939_STATUS_CODES CAN_Send_Message(uint32_t ID, uint8_t data[]) {
 	ENUM_J1939_STATUS_CODES status = STATUS_SEND_BUSY;
-	#if PROCESSOR_CHOICE == STM32
-	CAN_TxHeaderTypeDef TxHeader;
-	TxHeader.DLC = 8;											/* Here we are sending 8 bytes */
-	TxHeader.RTR = CAN_RTR_DATA;								/* Data frame */
-	TxHeader.IDE = CAN_ID_EXT;									/* We want to send an extended ID */
-	TxHeader.TransmitGlobalTime = DISABLE;
-	TxHeader.ExtId = ID;
-	TxHeader.StdId = 0x00; 										/* Not used */
-	status = STM32_PLC_CAN_Transmit(data, &TxHeader);
-	#elif PROCESSOR_CHOICE == ARDUINO_GENERIC
-	/* Implement your CAN send 8 bytes message function for the Arduino platform */
-	#elif PROCESSOR_CHOICE == PIC
-	/* Implement your CAN send 8 bytes message function for the PIC platform */
-	#elif PROCESSOR_CHOICE == AVR
-	/* Implement your CAN send 8 bytes message function for the AVR platform */
-    #elif PROCESSOR_CHOICE == QT_USB
-    status = QT_USB_Transmit(ID, data, 8);
-    #elif (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
+    #if (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
         CAN_FRAME frame;
         frame.length = 8;
         frame.rtr = 0;
@@ -119,6 +130,14 @@ ENUM_J1939_STATUS_CODES CAN_Send_Message(uint32_t ID, uint8_t data[]) {
         frame.id = ID;
         memcpy(&frame.data.value, data, 8);
         canBus->sendFrame(frame);
+        status = STATUS_SEND_OK;
+    #elif PROCESSOR_CHOICE == TEENSY_T4
+        CAN_message_t frame;
+        frame.len = 8;
+        frame.flags.extended = true;
+        frame.id = ID;
+        memcpy(frame.buf, data, 8);
+        canBus->write(frame);
         status = STATUS_SEND_OK;
 	#elif PROCESSOR_CHOICE == INTERNAL_CALLBACK
     /* Call our callback function */
@@ -136,24 +155,7 @@ ENUM_J1939_STATUS_CODES CAN_Send_Message(uint32_t ID, uint8_t data[]) {
  */
 ENUM_J1939_STATUS_CODES CAN_Send_Request(uint32_t ID, uint8_t PGN[]) {
 	ENUM_J1939_STATUS_CODES status = STATUS_SEND_BUSY;
-	#if PROCESSOR_CHOICE == STM32
-	CAN_TxHeaderTypeDef TxHeader;
-	TxHeader.DLC = 3;											/* Here we are only sending 3 bytes */
-	TxHeader.RTR = CAN_RTR_DATA;								/* Data frame */
-	TxHeader.IDE = CAN_ID_EXT;									/* We want to send an extended ID */
-	TxHeader.TransmitGlobalTime = DISABLE;
-	TxHeader.ExtId = ID;
-	TxHeader.StdId = 0x00; 										/* Not used */
-	status = STM32_PLC_CAN_Transmit(PGN, &TxHeader);
-	#elif PROCESSOR_CHOICE == ARDUINO_GENERIC
-	/* Implement your CAN send 3 bytes message function for the Arduino platform */
-	#elif PROCESSOR_CHOICE == PIC
-	/* Implement your CAN send 3 bytes message function for the PIC platform */
-	#elif PROCESSOR_CHOICE == AVR
-	/* Implement your CAN send 3 bytes message function for the AVR platform */
-    #elif PROCESSOR_CHOICE == QT_USB
-    status = QT_USB_Transmit(ID, PGN, 3);                       /* PGN is always 3 bytes */
-    #elif (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
+    #if (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
         CAN_FRAME frame;
         frame.length = 3;
         frame.rtr = 0;
@@ -161,6 +163,14 @@ ENUM_J1939_STATUS_CODES CAN_Send_Request(uint32_t ID, uint8_t PGN[]) {
         frame.id = ID;
         memcpy(&frame.data.value, PGN, 3);
         canBus->sendFrame(frame);
+        status = STATUS_SEND_OK;
+    #elif PROCESSOR_CHOICE == TEENSY_T4
+        CAN_message_t frame;
+        frame.len = 3;
+        frame.flags.extended = true;
+        frame.id = ID;
+        memcpy(frame.buf, data, 3);
+        canBus->write(frame);
         status = STATUS_SEND_OK;
 	#elif PROCESSOR_CHOICE == INTERNAL_CALLBACK
     /* Call our callback function */
@@ -176,17 +186,7 @@ ENUM_J1939_STATUS_CODES CAN_Send_Request(uint32_t ID, uint8_t PGN[]) {
 /* Read the current CAN-bus message. Returning false if the message has been read before, else true */
 bool CAN_Read_Message(uint32_t *ID, uint8_t data[]) {
 	bool is_new_message = false;
-	#if PROCESSOR_CHOICE == STM32
-	STM32_PLC_CAN_Get_ID_Data(ID, data, &is_new_message);
-	#elif PROCESSOR_CHOICE == ARDUINO_GENERIC
-	/* Implement your CAN function to get ID, data[] and the flag is_new_message here for the Arduino platform */
-	#elif PROCESSOR_CHOICE == PIC
-	/* Implement your CAN function to get ID, data[] and the flag is_new_message here for the PIC platform */
-	#elif PROCESSOR_CHOICE == AVR
-	/* Implement your CAN function to get ID, data[] and the flag is_new_message here for the AVR platform */
-    #elif PROCESSOR_CHOICE == QT_USB
-    QT_USB_Get_ID_Data(ID, data, &is_new_message);
-    #elif (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
+    #if (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
        if (read_idx == write_idx) return false;
        *ID = extFrames[read_idx].id;
        memcpy(data, &extFrames[read_idx].data.value, 8);
@@ -207,16 +207,8 @@ void CAN_Set_Callback_Functions(void (*Callback_Function_Send_)(uint32_t, uint8_
 }
 
 void CAN_Delay(uint8_t milliseconds) {
-	#if PROCESSOR_CHOICE == STM32
-
-	#elif (PROCESSOR_CHOICE == ARDUINO_GENERIC) || (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN)
+	#if (PROCESSOR_CHOICE == DUE_CAN) || (PROCESSOR_CHOICE == ESP32_CAN) || (PROCESSOR_CHOICE == TEENSY_T4)
         delay(milliseconds);
-	#elif PROCESSOR_CHOICE == PIC
-
-	#elif PROCESSOR_CHOICE == AVR
-
-	#elif PROCESSOR_CHOICE == QT_USB
-
 	#elif PROCESSOR_CHOICE == INTERNAL_CALLBACK
 	/* Storing start time */
 	clock_t start_time = clock();
